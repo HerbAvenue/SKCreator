@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+// Updated cross-platform IPFS profile script
 
 const fs = require("fs");
 const path = require("path");
@@ -20,17 +20,18 @@ const kuboURL = `https://dist.ipfs.tech/kubo/${kuboVersion}/kubo_${kuboVersion}_
 }-${arch}.tar.gz`;
 
 const localBinDir = path.join(__dirname, "ipfs-bin");
-const ipfsCmd = path.join(localBinDir, "ipfs");
+const ipfsCmd = path.join(localBinDir, platform === "win32" ? "ipfs.exe" : "ipfs");
 const userKeyFile = path.join(__dirname, "profile.key");
 
 function run(cmd, opts = {}) {
   try {
     const fullCmd = cmd.startsWith("ipfs ")
-      ? cmd.replace(/^ipfs/, `"${ipfsCmd}"`)
+      ? cmd.replace(/^ipfs/, `\"${ipfsCmd}\"`)
       : cmd;
     return execSync(fullCmd, {
       stdio: "pipe",
       env: { ...process.env, IPFS_PATH: repoRoot },
+      shell: platform === "win32" ? "powershell.exe" : undefined,
       ...opts,
     })
       .toString()
@@ -50,12 +51,10 @@ function prompt(q) {
     input: process.stdin,
     output: process.stdout,
   });
-  return new Promise((resolve) =>
-    rl.question(q, (a) => {
-      rl.close();
-      resolve(a.trim());
-    })
-  );
+  return new Promise((resolve) => rl.question(q, (a) => {
+    rl.close();
+    resolve(a.trim());
+  }));
 }
 
 function checkIPFS() {
@@ -90,18 +89,17 @@ async function downloadAndInstallIPFS() {
     });
   });
 
-  const finalPath = path.join(localBinDir, "ipfs");
+  const finalPath = ipfsCmd;
   if (!fs.existsSync(finalPath)) {
     const sub = path.join(localBinDir, "kubo");
-    const ipfsBinary = fs.readdirSync(sub).find((f) => f === "ipfs");
+    const ipfsBinary = fs.readdirSync(sub).find((f) => f === (platform === "win32" ? "ipfs.exe" : "ipfs"));
     if (ipfsBinary) {
       fs.copyFileSync(path.join(sub, ipfsBinary), finalPath);
-      fs.chmodSync(finalPath, 0o755);
+      if (platform !== "win32") fs.chmodSync(finalPath, 0o755);
     } else {
       throw new Error("ipfs binary not found in downloaded tar.");
     }
   }
-
   console.log("✅ IPFS installed locally.");
 }
 
@@ -109,7 +107,6 @@ function initIPFSRepo() {
   if (!fs.existsSync(path.join(repoRoot, "config"))) {
     run("ipfs init");
   }
-
   run("ipfs config Addresses.Gateway /ip4/127.0.0.1/tcp/8080");
   run("ipfs config Addresses.API /ip4/127.0.0.1/tcp/5001");
 }
@@ -125,35 +122,14 @@ function importUserKey() {
 
   if (fs.existsSync(userKeyFile)) {
     console.log("🔑 Importing saved IPNS key...");
-    run(`ipfs key import profile "${userKeyFile}"`);
+    run(`ipfs key import profile \"${userKeyFile}\"`);
   } else {
     console.log("🆕 Generating new IPNS key 'profile'...");
     run("ipfs key gen profile --type=rsa --size=2048");
   }
 }
 
-function killPortIfUsed(port = 5001) {
-  try {
-    const pid = execSync(`lsof -ti tcp:${port}`).toString().trim();
-    if (pid) {
-      const cmd = execSync(`ps -p ${pid} -o comm=`).toString().trim();
-      if (cmd.includes("ipfs")) {
-        console.log(`🔪 Killing IPFS on port ${port} (PID: ${pid})...`);
-        execSync(`kill -9 ${pid}`);
-      } else {
-        console.warn(
-          `⚠️ Port ${port} in use by non-IPFS process (${cmd}). Skipping kill.`
-        );
-      }
-    }
-  } catch {
-    // Port is free or lsof not installed
-  }
-}
-
 async function main() {
-  killPortIfUsed(5001); // 👈 kill any existing IPFS daemon on 5001
-
   if (!checkIPFS()) {
     await downloadAndInstallIPFS();
   }
@@ -165,6 +141,7 @@ async function main() {
   const daemon = spawn(ipfsCmd, ["daemon"], {
     env: { ...process.env, IPFS_PATH: repoRoot },
     stdio: "inherit",
+    shell: platform === "win32" ? true : false,
   });
 
   await new Promise((r) => setTimeout(r, 3000));
@@ -177,28 +154,18 @@ async function main() {
   const base = path.join(__dirname, "profile");
   const postsDir = path.join(base, "posts");
   ensureDir(postsDir);
-  fs.writeFileSync(
-    path.join(base, "profile.json"),
-    JSON.stringify({ name, bio, created: timestamp }, null, 2)
-  );
-  fs.writeFileSync(
-    path.join(postsDir, "post0.json"),
-    JSON.stringify({ timestamp, content: post }, null, 2)
-  );
-  fs.writeFileSync(
-    path.join(base, "status_index.json"),
-    JSON.stringify({ posts: ["/posts/post0.json"] }, null, 2)
-  );
+  fs.writeFileSync(path.join(base, "profile.json"), JSON.stringify({ name, bio, created: timestamp }, null, 2));
+  fs.writeFileSync(path.join(postsDir, "post0.json"), JSON.stringify({ timestamp, content: post }, null, 2));
+  fs.writeFileSync(path.join(base, "status_index.json"), JSON.stringify({ posts: ["/posts/post0.json"] }, null, 2));
 
-  const hash = run(`ipfs add -Qr --cid-version=1 --raw-leaves "${base}"`);
+  const hash = run(`ipfs add -Qr --cid-version=1 --raw-leaves \"${base}\"`);
 
-  // Remove old pins
+  // Clean up old pins
   try {
     const existingPins = run(`ipfs pin ls --type=recursive`)
       .split("\n")
       .map((line) => line.split(" ")[0])
       .filter((cid) => cid && cid !== hash);
-
     for (const cid of existingPins) {
       console.log(`🧹 Unpinning old CID: ${cid}`);
       run(`ipfs pin rm ${cid}`);
@@ -208,7 +175,7 @@ async function main() {
   }
 
   const publishOut = run(`ipfs name publish --key=profile /ipfs/${hash}`);
-  const ipns = publishOut.split(" ")[2].trim().slice(0, -1);
+  const ipns = publishOut.split(" ")[2].trim().replace(/\/$/, "");
 
   console.log("\n✅ Profile live (while script runs):");
   console.log(`📦 IPFS CID: ${hash}`);
@@ -218,7 +185,7 @@ async function main() {
   await prompt("\n🔚 Press Enter to stop and export your key...");
 
   try {
-    run(`ipfs key export profile --output="${userKeyFile}"`);
+    run(`ipfs key export profile --output=\"${userKeyFile}\"`);
     console.log(`🔐 Key exported to ${userKeyFile}`);
   } catch (e) {
     console.warn("⚠️ Failed to export key:", e.message);

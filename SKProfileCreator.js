@@ -132,7 +132,28 @@ function importUserKey() {
   }
 }
 
+function killPortIfUsed(port = 5001) {
+  try {
+    const pid = execSync(`lsof -ti tcp:${port}`).toString().trim();
+    if (pid) {
+      const cmd = execSync(`ps -p ${pid} -o comm=`).toString().trim();
+      if (cmd.includes("ipfs")) {
+        console.log(`🔪 Killing IPFS on port ${port} (PID: ${pid})...`);
+        execSync(`kill -9 ${pid}`);
+      } else {
+        console.warn(
+          `⚠️ Port ${port} in use by non-IPFS process (${cmd}). Skipping kill.`
+        );
+      }
+    }
+  } catch {
+    // Port is free or lsof not installed
+  }
+}
+
 async function main() {
+  killPortIfUsed(5001); // 👈 kill any existing IPFS daemon on 5001
+
   if (!checkIPFS()) {
     await downloadAndInstallIPFS();
   }

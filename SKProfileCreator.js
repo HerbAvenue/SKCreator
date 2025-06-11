@@ -190,7 +190,7 @@ async function main() {
     JSON.stringify({ posts: ["/posts/post0.json"] }, null, 2)
   );
 
-  const hash = run(`ipfs add -Qr ${base}`);
+  const hash = run(`ipfs add -Qr --cid-version=1 --raw-leaves "${base}"`);
 
   // Remove old pins
   try {

@@ -1,4 +1,4 @@
-// Updated cross-platform IPFS profile script
+// Updated cross-platform IPFS profile script with Windows zip support
 
 const fs = require("fs");
 const path = require("path");
@@ -8,6 +8,7 @@ const readline = require("readline");
 const { execSync, spawn } = require("child_process");
 const { createGunzip } = require("zlib");
 const tar = require("tar");
+const unzipper = require("unzipper");
 
 const repoRoot = path.join(__dirname, "ipfs-user-profile");
 process.env.IPFS_PATH = repoRoot;
@@ -15,12 +16,12 @@ process.env.IPFS_PATH = repoRoot;
 const platform = os.platform();
 const arch = os.arch() === "x64" ? "amd64" : os.arch();
 const kuboVersion = "v0.24.0";
-const kuboURL = `https://dist.ipfs.tech/kubo/${kuboVersion}/kubo_${kuboVersion}_${
-  platform === "win32" ? "windows" : platform
-}-${arch}.tar.gz`;
+const isWindows = platform === "win32";
+const fileExt = isWindows ? "zip" : "tar.gz";
+const kuboURL = `https://dist.ipfs.tech/kubo/${kuboVersion}/kubo_${kuboVersion}_${platform}-${arch}.${fileExt}`;
 
 const localBinDir = path.join(__dirname, "ipfs-bin");
-const ipfsCmd = path.join(localBinDir, platform === "win32" ? "ipfs.exe" : "ipfs");
+const ipfsCmd = path.join(localBinDir, isWindows ? "ipfs.exe" : "ipfs");
 const userKeyFile = path.join(__dirname, "profile.key");
 
 function run(cmd, opts = {}) {
@@ -31,7 +32,7 @@ function run(cmd, opts = {}) {
     return execSync(fullCmd, {
       stdio: "pipe",
       env: { ...process.env, IPFS_PATH: repoRoot },
-      shell: platform === "win32" ? "powershell.exe" : undefined,
+      shell: isWindows ? "powershell.exe" : undefined,
       ...opts,
     })
       .toString()
@@ -76,28 +77,30 @@ async function downloadAndInstallIPFS() {
       if (res.statusCode !== 200) {
         return reject(new Error(`Failed to download: ${res.statusCode}`));
       }
-      res
-        .pipe(createGunzip())
-        .pipe(
-          tar.x({
-            cwd: localBinDir,
-            strip: 1,
-          })
-        )
-        .on("finish", resolve)
-        .on("error", reject);
-    });
+      if (isWindows) {
+        res
+          .pipe(unzipper.Extract({ path: localBinDir }))
+          .on("close", resolve)
+          .on("error", reject);
+      } else {
+        res
+          .pipe(createGunzip())
+          .pipe(tar.x({ cwd: localBinDir, strip: 1 }))
+          .on("finish", resolve)
+          .on("error", reject);
+      }
+    }).on("error", reject);
   });
 
   const finalPath = ipfsCmd;
   if (!fs.existsSync(finalPath)) {
     const sub = path.join(localBinDir, "kubo");
-    const ipfsBinary = fs.readdirSync(sub).find((f) => f === (platform === "win32" ? "ipfs.exe" : "ipfs"));
+    const ipfsBinary = fs.readdirSync(sub).find((f) => f === (isWindows ? "ipfs.exe" : "ipfs"));
     if (ipfsBinary) {
       fs.copyFileSync(path.join(sub, ipfsBinary), finalPath);
-      if (platform !== "win32") fs.chmodSync(finalPath, 0o755);
+      if (!isWindows) fs.chmodSync(finalPath, 0o755);
     } else {
-      throw new Error("ipfs binary not found in downloaded tar.");
+      throw new Error("ipfs binary not found in downloaded archive.");
     }
   }
   console.log("✅ IPFS installed locally.");
@@ -141,7 +144,7 @@ async function main() {
   const daemon = spawn(ipfsCmd, ["daemon"], {
     env: { ...process.env, IPFS_PATH: repoRoot },
     stdio: "inherit",
-    shell: platform === "win32" ? true : false,
+    shell: isWindows,
   });
 
   await new Promise((r) => setTimeout(r, 3000));

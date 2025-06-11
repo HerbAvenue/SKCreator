@@ -191,6 +191,22 @@ async function main() {
   );
 
   const hash = run(`ipfs add -Qr ${base}`);
+
+  // Remove old pins
+  try {
+    const existingPins = run(`ipfs pin ls --type=recursive`)
+      .split("\n")
+      .map((line) => line.split(" ")[0])
+      .filter((cid) => cid && cid !== hash);
+
+    for (const cid of existingPins) {
+      console.log(`🧹 Unpinning old CID: ${cid}`);
+      run(`ipfs pin rm ${cid}`);
+    }
+  } catch (e) {
+    console.warn("⚠️ Failed to clean old pins:", e.message);
+  }
+
   const publishOut = run(`ipfs name publish --key=profile /ipfs/${hash}`);
   const ipns = publishOut.split(" ")[2].trim().slice(0, -1);
 

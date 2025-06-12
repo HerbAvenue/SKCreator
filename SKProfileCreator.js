@@ -18,7 +18,7 @@ const platform = rawPlatform === "win32" ? "windows" : rawPlatform; // 👈 FIX
 const arch = os.arch() === "x64" ? "amd64" : os.arch();
 const isWindows = rawPlatform === "win32";
 const fileExt = isWindows ? "zip" : "tar.gz";
-const kuboVersion = "v0.24.0";
+const kuboVersion = "v0.35.0";
 const kuboURL = `https://dist.ipfs.tech/kubo/${kuboVersion}/kubo_${kuboVersion}_${platform}-${arch}.${fileExt}`;
 
 const localBinDir = path.join(__dirname, "ipfs-bin");
@@ -27,13 +27,15 @@ const userKeyFile = path.join(__dirname, "profile.key");
 
 function run(cmd, opts = {}) {
   try {
-    const fullCmd = cmd.startsWith("ipfs ")
-      ? cmd.replace(/^ipfs/, `\"${ipfsCmd}\"`)
-      : cmd;
-    return execSync(fullCmd, {
+    const parts = cmd.split(" ");
+    const isIpfsCmd = parts[0] === "ipfs";
+    const binary = isIpfsCmd ? ipfsCmd : parts[0];
+    const args = isIpfsCmd ? parts.slice(1) : parts.slice(1);
+
+    return execSync([binary, ...args].join(" "), {
       stdio: "pipe",
       env: { ...process.env, IPFS_PATH: repoRoot },
-      shell: isWindows ? "powershell.exe" : undefined,
+      shell: isWindows ? true : undefined,
       ...opts,
     })
       .toString()

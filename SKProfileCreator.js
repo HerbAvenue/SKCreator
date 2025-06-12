@@ -13,11 +13,12 @@ const unzipper = require("unzipper");
 const repoRoot = path.join(__dirname, "ipfs-user-profile");
 process.env.IPFS_PATH = repoRoot;
 
-const platform = os.platform();
+const rawPlatform = os.platform();
+const platform = rawPlatform === "win32" ? "windows" : rawPlatform; // 👈 FIX
 const arch = os.arch() === "x64" ? "amd64" : os.arch();
-const kuboVersion = "v0.24.0";
-const isWindows = platform === "win32";
+const isWindows = rawPlatform === "win32";
 const fileExt = isWindows ? "zip" : "tar.gz";
+const kuboVersion = "v0.24.0";
 const kuboURL = `https://dist.ipfs.tech/kubo/${kuboVersion}/kubo_${kuboVersion}_${platform}-${arch}.${fileExt}`;
 
 const localBinDir = path.join(__dirname, "ipfs-bin");
@@ -52,10 +53,12 @@ function prompt(q) {
     input: process.stdin,
     output: process.stdout,
   });
-  return new Promise((resolve) => rl.question(q, (a) => {
-    rl.close();
-    resolve(a.trim());
-  }));
+  return new Promise((resolve) =>
+    rl.question(q, (a) => {
+      rl.close();
+      resolve(a.trim());
+    })
+  );
 }
 
 function checkIPFS() {
@@ -73,29 +76,33 @@ async function downloadAndInstallIPFS() {
   ensureDir(localBinDir);
 
   await new Promise((resolve, reject) => {
-    https.get(kuboURL, (res) => {
-      if (res.statusCode !== 200) {
-        return reject(new Error(`Failed to download: ${res.statusCode}`));
-      }
-      if (isWindows) {
-        res
-          .pipe(unzipper.Extract({ path: localBinDir }))
-          .on("close", resolve)
-          .on("error", reject);
-      } else {
-        res
-          .pipe(createGunzip())
-          .pipe(tar.x({ cwd: localBinDir, strip: 1 }))
-          .on("finish", resolve)
-          .on("error", reject);
-      }
-    }).on("error", reject);
+    https
+      .get(kuboURL, (res) => {
+        if (res.statusCode !== 200) {
+          return reject(new Error(`Failed to download: ${res.statusCode}`));
+        }
+        if (isWindows) {
+          res
+            .pipe(unzipper.Extract({ path: localBinDir }))
+            .on("close", resolve)
+            .on("error", reject);
+        } else {
+          res
+            .pipe(createGunzip())
+            .pipe(tar.x({ cwd: localBinDir, strip: 1 }))
+            .on("finish", resolve)
+            .on("error", reject);
+        }
+      })
+      .on("error", reject);
   });
 
   const finalPath = ipfsCmd;
   if (!fs.existsSync(finalPath)) {
     const sub = path.join(localBinDir, "kubo");
-    const ipfsBinary = fs.readdirSync(sub).find((f) => f === (isWindows ? "ipfs.exe" : "ipfs"));
+    const ipfsBinary = fs
+      .readdirSync(sub)
+      .find((f) => f === (isWindows ? "ipfs.exe" : "ipfs"));
     if (ipfsBinary) {
       fs.copyFileSync(path.join(sub, ipfsBinary), finalPath);
       if (!isWindows) fs.chmodSync(finalPath, 0o755);
@@ -157,9 +164,18 @@ async function main() {
   const base = path.join(__dirname, "profile");
   const postsDir = path.join(base, "posts");
   ensureDir(postsDir);
-  fs.writeFileSync(path.join(base, "profile.json"), JSON.stringify({ name, bio, created: timestamp }, null, 2));
-  fs.writeFileSync(path.join(postsDir, "post0.json"), JSON.stringify({ timestamp, content: post }, null, 2));
-  fs.writeFileSync(path.join(base, "status_index.json"), JSON.stringify({ posts: ["/posts/post0.json"] }, null, 2));
+  fs.writeFileSync(
+    path.join(base, "profile.json"),
+    JSON.stringify({ name, bio, created: timestamp }, null, 2)
+  );
+  fs.writeFileSync(
+    path.join(postsDir, "post0.json"),
+    JSON.stringify({ timestamp, content: post }, null, 2)
+  );
+  fs.writeFileSync(
+    path.join(base, "status_index.json"),
+    JSON.stringify({ posts: ["/posts/post0.json"] }, null, 2)
+  );
 
   const hash = run(`ipfs add -Qr --cid-version=1 --raw-leaves \"${base}\"`);
 

@@ -196,7 +196,7 @@ async function main() {
   }
 
   const publishOut = run(`ipfs name publish --key=profile /ipfs/${hash}`);
-  const ipns = publishOut.split(" ")[2].trim().replace(/\/$/, "");
+  const ipns = publishOut.split(" ")[2].trim().replace(/\/$/, "").slice(0, -1);
 
   console.log("\n✅ Profile live (while script runs):");
   console.log(`📦 IPFS CID: ${hash}`);

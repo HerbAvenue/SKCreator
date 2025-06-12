@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "tar": "^7.4.3"
+    "tar": "^7.4.3",
+    "unzipper": "^0.12.3"
   }
 }
